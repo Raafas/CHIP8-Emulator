@@ -23,7 +23,6 @@ private:
     unsigned short pc; //Program count
     unsigned char delay_timer;
     unsigned char sound_timer;
-    unsigned char key[16]; //HEX based keypad. Current state of key
     unsigned short stack[16]; //The stack is used to remember the current location before a jump is performed
     unsigned short sp; //remember which level of the stack is used
     
@@ -34,7 +33,10 @@ public:
     void init();
     void emulateCycle();
     void initialize();
-
+    void debugRender();
+    bool loadApplication(const char * filename);	
     
+    bool drawFlag;
     unsigned char gfx[64 * 32]; //2048 pixels
+    unsigned char key[16]; //HEX based keypad. Current state of key
 };
