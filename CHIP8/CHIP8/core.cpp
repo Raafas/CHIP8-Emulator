@@ -7,6 +7,9 @@
 //
 
 #include "core.h"
+#include <time.h>
+#include <stdio.h>
+#include <stdlib.h>
 
 
 void core::init()
@@ -98,11 +101,30 @@ void core::emulateCycle()
             I = opcode & 0x0FF;
             pc += 2;
             break;
+        
+        case 0xB000: // BNNN: Jumps to the address NNN plus V0
+            pc = (opcode & 0x0FFF) + V[0];
+            break;
             
+        case 0xC000: // CXNN: Sets VX to a random number and NN
+            V[(opcode & 0x0F00) >> 8] = (rand() % 0xFF) & (opcode & 0x00FF);
+            pc += 2;
+            break;
+         
+        //0xD000: // DXYN: Draws a sprite at coordinate (VX, VY) that has a width of 8 pixels and a height of N pixels.
 
             
     }
-    //TODO: update timers
+    //update timers
+    if(delay_timer > 0)
+        --delay_timer;
+    
+    if(sound_timer > 0)
+    {
+        if(sound_timer == 1)
+            printf("BEEP!\n");
+        --sound_timer;
+    }
 }
 
 
