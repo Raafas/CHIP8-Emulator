@@ -67,8 +67,15 @@ void core::emulateCycle()
             switch(opcode & 0x000F){
                 case 0x0000: // 0x00E0: Clears the screen
                     clearScreen();
+                    drawFlag = true;
+                    pc += 2;
                     break;
                     
+                case 0x000E: // 0x00EE: Returns from subroutine
+                    --sp;			// 16 levels of stack, decrease stack pointer to prevent overwrite
+                    pc = stack[sp];	// Put the stored return address from the stack back into the program counter
+                    pc += 2;		// Don't forget to increase the program counter!
+                    break;
                 default:
                     printf("Invalid opcode: 0x%X\n",opcode);
             }

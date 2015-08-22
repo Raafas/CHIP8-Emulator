@@ -37,46 +37,21 @@ void keyboardUp(unsigned char key, int x, int y);
 void keyboardDown(unsigned char key, int x, int y);
 
 
-
-//void display()
-//{
-//    glClear(GL_COLOR_BUFFER_BIT);
-//    
-//    glBegin(GL_POLYGON);
-//    glVertex2f(-0.5, -0.5);
-//    glVertex2f(-0.5,  0.5);
-//    glVertex2f(0.5,  0.5);
-//    glVertex2f(0.5, -0.5);
-//    glEnd();
-//    
-//    glFlush();
-//}
-
-void init()
-{
-    glClearColor(0.000, 0.110, 0.392, 0.0); // JMU Gold
-    
-    glColor3f(0.314, 0.314, 0.000); // JMU Purple
-    
-    glMatrixMode(GL_PROJECTION);
-    glLoadIdentity();
-    gluOrtho2D(-1.0, 1.0, -1.0, 1.0);
-}
-
 int main(int argc, char** argv)
 {
-    chip8.init();
-    chip8.emulateCycle();
     // Load game
     if(!chip8.loadApplication(argv[1]))
         return 1;
+    
+    printf("Load ok");
 
     glutInit(&argc, argv);
     glutInitDisplayMode(GLUT_DOUBLE | GLUT_RGBA);
-    glutInitWindowSize(640, 480);
+ 
+    glutInitWindowSize(display_width, display_height);
     glutInitWindowPosition(0, 0);
-    
     glutCreateWindow("CHIP8");
+    
     glutDisplayFunc(display);
     glutIdleFunc(display);
     glutReshapeFunc(reshape_window);
@@ -88,6 +63,7 @@ int main(int argc, char** argv)
 #endif
     glutMainLoop();
 
+    return 0;
 }
 
 void setupTexture()
@@ -218,8 +194,6 @@ void keyboardDown(unsigned char key, int x, int y)
     else if(key == 'x')	chip8.key[0x0] = 1;
     else if(key == 'c')	chip8.key[0xB] = 1;
     else if(key == 'v')	chip8.key[0xF] = 1;
-    
-    //printf("Press key %c\n", key);
 }
 
 void keyboardUp(unsigned char key, int x, int y)
