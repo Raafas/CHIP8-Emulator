@@ -12,8 +12,10 @@
 #else 
 #include <GL/glut.h>
 #endif
+#include "core.h"
 
 
+core chip8;
 
 void display()
 {
@@ -46,7 +48,7 @@ int main(int argc, char** argv)
     glutInitDisplayMode(GLUT_SINGLE | GLUT_RGB);
     glutInitWindowSize(640, 480);
     glutInitWindowPosition(0, 0);
-    glutCreateWindow("Test");
+    glutCreateWindow("CHIP8");
     glutDisplayFunc(display);
     init();
     glutMainLoop();
