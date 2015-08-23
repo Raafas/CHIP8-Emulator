@@ -72,18 +72,11 @@ void core::init()
     SP = 0;
     
     //Clear
-    
     memset(memory, 0, sizeof(uint8_t)  * MEM_SIZE);
     memset(V,      0, sizeof(uint8_t)  * 16);
     memset(gfx,    0, sizeof(uint8_t)  * GFX_SIZE);
     memset(stack,  0, sizeof(uint16_t) * STACK_SIZE);
     memset(key,    0, sizeof(uint8_t)  * KEY_SIZE);
-    
-    clearScreen();
-//    for(int i = 0; i < 4096; ++i) memory[i] = 0; //clear memory
-//    for(int i = 0; i < 16; ++i) stack[i] = 0;
-//    for(int i = 0; i < 16; ++i) key[i] = V[i] = 0;
-    
     
     // Load fontset
     for(int i = 0; i < 80; ++i) memory[i] = chip8_fontset[i];
@@ -92,11 +85,6 @@ void core::init()
     delay_timer = 0;
     sound_timer = 0;
     srand( static_cast<unsigned int>(time(NULL)));
-}
-
-
-void core::clearScreen(){
-//    for(int i = 0; i < 2048; ++i) gfx[i] = 0; //clear display
 }
 
 void core::initialize()
@@ -170,7 +158,7 @@ void core::emulateCycle()
     printf("PC: 0x%04x Op: 0x%04x\n", PC, opcode);
 #endif
     
-    // decode & execute: case on the highest order byte
+    // decode & execute
     switch (opcode & 0xF000) {
         case 0x0000:
             switch (kk) {
@@ -188,24 +176,24 @@ void core::emulateCycle()
                     unknown_opcode(opcode);
             }
             break;
-        case 0x1000: // 1nnn: jump to address nnn
+        case 0x1000: // 1NNN: jump to address nnn
             p("Jump to address 0x%x\n", nnn);
             PC = nnn;
             break;
-        case 0x2000: // 2nnn: call address nnn
+        case 0x2000: // 2NNN: call address nnn
             p("Call address 0x%x\n", nnn);
             stack[SP++] = PC + 2;
             PC = nnn;
             break;
-        case 0x3000: // 3xkk: skip next instr if V[x] = kk
+        case 0x3000: // 3xKK: skip next instr if V[x] = kk
             p("Skip next instruction if 0x%x == 0x%x\n", V[x], kk);
             PC += (V[x] == kk) ? 4 : 2;
             break;
-        case 0x4000: // 4xkk: skip next instr if V[x] != kk
+        case 0x4000: // 4xKK: skip next instr if V[x] != kk
             p("Skip next instruction if 0x%x != 0x%x\n", V[x], kk);
             PC += (V[x] != kk) ? 4 : 2;
             break;
-        case 0x5000: // 5xy0: skip next instr if V[x] == V[y]
+        case 0x5000: // 5xY0: skip next instr if V[x] == V[y]
             p("Skip next instruction if 0x%x == 0x%x\n", V[x], V[y]);
             PC += (V[x] == V[y]) ? 4 : 2;
             break;
@@ -387,26 +375,6 @@ void core::emulateCycle()
 #endif
 }
 
-void core::debugRender()
-{
-    // Draw
-    for(int y = 0; y < 32; ++y)
-    {
-        for(int x = 0; x < 64; ++x)
-        {
-            if(gfx[(y*64) + x] == 0)
-                printf("O");
-            else
-                printf(" ");
-        }
-        printf("\n");
-    }
-    printf("\n");
-}
-
-
-
-
 bool core::loadApplication(const char * filename)
 {
     init();
@@ -466,7 +434,8 @@ void core::tick(){
     if (sound_timer > 0) {
         --sound_timer;
         if (sound_timer == 0) {
-            printf("BEEP!\n");
+            printf("\a");
+            b("\a");
         }
     }
 }

@@ -17,6 +17,14 @@
 
 #endif /* defined(__CHIP8__core__) */
 
+#ifdef __APPLE__
+#define b(...) printf(__VA_ARGS__);
+#else
+#include <windows.h>
+#define b(...) Beep(__VA_ARGS__);
+#endif
+
+
 #define MEM_SIZE 4096
 #define GFX_ROWS 32
 #define GFX_COLS 64
@@ -30,18 +38,6 @@
 
 class core {
 private:
-//    unsigned short opcode; //store current opcode
-//    unsigned char memory[4096]; //4k memory emulated
-//    unsigned char V[16]; //8bit register
-//    unsigned short I; //Index register
-//    unsigned short pc; //Program count
-//    unsigned char delay_timer;
-//    unsigned char sound_timer;
-//    unsigned short stack[16]; //The stack is used to remember the current location before a jump is performed
-//    unsigned short sp; //remember which level of the stack is used
-    
-    void clearScreen();
-    void gfxSprite(unsigned short X, unsigned short Y, unsigned short N);
     void draw_sprite(uint8_t x, uint8_t y, uint8_t n);
     
 public:
@@ -52,9 +48,4 @@ public:
     bool loadApplication(const char * filename);
     void tick();
     void setkeys();
-    
-//    bool drawFlag;
-//    unsigned char gfx[64 * 32]; //2048 pixels
-//    bool gfx[32][64];
-//    unsigned char key[16]; //HEX based keypad. Current state of key
 };

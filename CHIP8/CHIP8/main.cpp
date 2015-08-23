@@ -22,22 +22,22 @@
 #include <float.h>
 #include <sys/time.h>
 
-
-core chip8;
-
-
 #define PIXEL_SIZE 5
 
+//Clock
 #define CLOCK_HZ 60
 #define CLOCK_RATE_MS ((int) ((1.0 / CLOCK_HZ) * 1000 + 0.5))
 
+//Display colors
 #define BLACK 0
 #define WHITE 255
 
 #define SCREEN_ROWS (GFX_ROWS * PIXEL_SIZE)
 #define SCREEN_COLS (GFX_COLS * PIXEL_SIZE)
-unsigned char screen[SCREEN_ROWS][SCREEN_COLS][3];
 
+
+core chip8;
+unsigned char screen[SCREEN_ROWS][SCREEN_COLS][3];
 extern uint8_t key[KEY_SIZE];
 extern uint8_t gfx[GFX_ROWS][GFX_COLS];
 extern bool chip8_draw_flag;
@@ -46,7 +46,6 @@ struct timeval clock_prev;
 
 int timediff_ms(struct timeval *end, struct timeval *start) {
     int diff =  (int)(end->tv_sec - start->tv_sec) * 1000 + (end->tv_usec - start->tv_usec) / 1000;
-    //printf("timediff = %d\n", diff);
     return diff;
 }
 
@@ -182,7 +181,7 @@ int main(int argc, char **argv) {
     
     gettimeofday(&clock_prev, NULL);
     
-    // Run the emulator
+    // Run
     glutMainLoop();  
     
     return 0;
