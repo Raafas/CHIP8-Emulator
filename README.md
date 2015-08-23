@@ -13,5 +13,14 @@ CHIP-8 has two timers. They both count down at 60 hertz, until they reach 0.
 
 #Opcode table
 
-#Games
+#Compile
+Depends on OpenGL and GLUT
+###Linux: Ubuntu# sudo apt-get install freeglut3-dev or Fedora/RedHat# sudo yum install freeglut-devel
+###Windows: https://www.opengl.org/resources/libraries/glut/glut37.zip
+###OS X: OpenGL and GLUT come with the OS and Xcode installations.
+
+#Use
+./CHIP8 <game.c8>
+
+#More games
 http://www.pong-story.com/chip8/ some games.
