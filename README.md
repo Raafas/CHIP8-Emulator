@@ -4,6 +4,11 @@ CHIP-8 is an interpreted programming language, developed by Joseph Weisbecker. I
 
 Roughly twenty years after CHIP-8 was introduced, derived interpreters appeared for some models of graphing calculators (from the late 1980s onward, these handheld devices in many ways have more computing power than most mid-1970s microcomputers for hobbyists).
 
+![game1](Docs/game1.png)
+
+![game2](Docs/game2.png)
+
+![game3](Docs/game3.png)
 
 #Registers
 CHIP-8 has 16 8-bit data registers named from V0 to VF. The VF register doubles as a carry flag.
@@ -15,12 +20,16 @@ CHIP-8 has two timers. They both count down at 60 hertz, until they reach 0.
 
 #Compile
 Depends on OpenGL and GLUT
-###Linux: Ubuntu# sudo apt-get install freeglut3-dev or Fedora/RedHat# sudo yum install freeglut-devel
-###Windows: https://www.opengl.org/resources/libraries/glut/glut37.zip
-###OS X: OpenGL and GLUT come with the OS and Xcode installations.
+-  Linux: 
+  -  Ubuntu: sudo apt-get install freeglut3-dev
+  -  Fedora/RedHat: sudo yum install freeglut-devel
+-  Windows:
+  -  Download link https://www.opengl.org/resources/libraries/glut/glut37.zip
+- OS X:
+  -  OpenGL and GLUT come with the OS and Xcode installations.
 
 #Use
-./CHIP8 <game.c8>
+./CHIP8 game.c8
 
 #More games
 http://www.pong-story.com/chip8/ some games.
