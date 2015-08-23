@@ -7,10 +7,41 @@
 //
 
 #include "core.h"
-#include <time.h>
-#include <stdio.h>
-#include <stdlib.h>
 
+
+#define unknown_opcode(op) \
+do { \
+fprintf(stderr, "Unknown opcode: 0x%x\n", op); \
+fprintf(stderr, "kk: 0x%02x\n", kk); \
+exit(42); \
+} while (0)
+
+#define IS_BIT_SET(byte, bit) (((0x80 >> (bit)) & (byte)) != 0x0)
+
+#define FONTSET_ADDRESS 0x00
+#define FONTSET_BYTES_PER_CHAR 5
+
+
+#ifdef DEBUG
+#define p(...) printf(__VA_ARGS__);
+#else
+#define p(...)
+#endif
+
+uint16_t opcode;
+uint8_t  memory[MEM_SIZE];
+uint8_t  V[16];
+uint16_t I;
+uint16_t PC;
+uint8_t  gfx[GFX_ROWS][GFX_COLS];
+uint8_t  delay_timer;
+uint8_t  sound_timer;
+uint16_t stack[STACK_SIZE];
+uint16_t SP;
+uint8_t  key[KEY_SIZE];
+bool     chip8_draw_flag;
+
+static inline uint8_t randbyte() { return (rand() % 256); }
 
 unsigned char chip8_fontset[80] =
 {
@@ -35,20 +66,37 @@ unsigned char chip8_fontset[80] =
 void core::init()
 {
                 //RESET
-    pc = 0x200; //Start address program
+    PC = 0x200; //Start address program
     opcode = 0; //Current opcode
     I = 0;      //index register
+    SP = 0;
+    
+    //Clear
+    
+    memset(memory, 0, sizeof(uint8_t)  * MEM_SIZE);
+    memset(V,      0, sizeof(uint8_t)  * 16);
+    memset(gfx,    0, sizeof(uint8_t)  * GFX_SIZE);
+    memset(stack,  0, sizeof(uint16_t) * STACK_SIZE);
+    memset(key,    0, sizeof(uint8_t)  * KEY_SIZE);
     
     clearScreen();
-    for(int i = 0; i < 4096; ++i) memory[i] = 0; //clear memory
+//    for(int i = 0; i < 4096; ++i) memory[i] = 0; //clear memory
+//    for(int i = 0; i < 16; ++i) stack[i] = 0;
+//    for(int i = 0; i < 16; ++i) key[i] = V[i] = 0;
     
+    
+    // Load fontset
+    for(int i = 0; i < 80; ++i) memory[i] = chip8_fontset[i];
+    
+    chip8_draw_flag = true;
     delay_timer = 0;
     sound_timer = 0;
+    srand( static_cast<unsigned int>(time(NULL)));
 }
 
 
 void core::clearScreen(){
-    for(int i = 0; i < 2048; ++i) gfx[i] = 0; //clear display
+//    for(int i = 0; i < 2048; ++i) gfx[i] = 0; //clear display
 }
 
 void core::initialize()
@@ -57,301 +105,286 @@ void core::initialize()
 }
 
 
+void core::draw_sprite(uint8_t x, uint8_t y, uint8_t n) {
+    unsigned row = y, col = x;
+    unsigned byte_index;
+    unsigned bit_index;
+    
+    // set the collision flag to 0
+    V[0xF] = 0;
+    for (byte_index = 0; byte_index < n; byte_index++) {
+        uint8_t byte = memory[I + byte_index];
+        
+        for (bit_index = 0; bit_index < 8; bit_index++) {
+            // the value of the bit in the sprite
+            uint8_t bit = (byte >> bit_index) & 0x1;
+            // the value of the current pixel on the screen
+            uint8_t *pixelp = &gfx[(row + byte_index) % GFX_ROWS][(col + (7 - bit_index)) % GFX_COLS];
+            
+            // if drawing to the screen would cause any pixel to be erased,
+            // set the collision flag to 1
+            if (bit == 1 && *pixelp ==1) V[0xF] = 1;
+            
+            // draw this pixel by XOR
+            *pixelp = *pixelp ^ bit;
+        }
+    }
+}
+
+static void print_state() {
+    printf("------------------------------------------------------------------\n");
+    printf("\n");
+    
+    printf("V0: 0x%02x  V4: 0x%02x  V8: 0x%02x  VC: 0x%02x\n",
+           V[0], V[4], V[8], V[12]);
+    printf("V1: 0x%02x  V5: 0x%02x  V9: 0x%02x  VD: 0x%02x\n",
+           V[1], V[5], V[9], V[13]);
+    printf("V2: 0x%02x  V6: 0x%02x  VA: 0x%02x  VE: 0x%02x\n",
+           V[2], V[6], V[10], V[14]);
+    printf("V3: 0x%02x  V7: 0x%02x  VB: 0x%02x  VF: 0x%02x\n",
+           V[3], V[7], V[11], V[15]);
+    
+    printf("\n");
+    printf("PC: 0x%04x\n", PC);
+    printf("\n");
+    printf("\n");
+}
+
+
 void core::emulateCycle()
 {
-    opcode = memory[pc] << 8 | memory[pc+1]; //fetch opcode
+    int i;
+    uint8_t x, y, n;
+    uint8_t kk;
+    uint16_t nnn;
     
-    //decode opcode
+    // fetch
+    opcode = memory[PC] << 8 | memory[PC + 1];
+    x   = (opcode >> 8) & 0x000F; // the lower 4 bits of the high byte
+    y   = (opcode >> 4) & 0x000F; // the upper 4 bits of the low byte
+    n   = opcode & 0x000F; // the lowest 4 bits
+    kk  = opcode & 0x00FF; // the lowest 8 bits
+    nnn = opcode & 0x0FFF; // the lowest 12 bits
+    
+#ifdef DEBUG
+    printf("PC: 0x%04x Op: 0x%04x\n", PC, opcode);
+#endif
+    
+    // decode & execute: case on the highest order byte
     switch (opcode & 0xF000) {
         case 0x0000:
-            switch(opcode & 0x000F){
-                case 0x0000: // 0x00E0: Clears the screen
-                    clearScreen();
-                    drawFlag = true;
-                    pc += 2;
+            switch (kk) {
+                case 0x00E0: // clear the screen
+                    p("Clear the screen\n");
+                    memset(gfx, 0, sizeof(uint8_t) * GFX_SIZE);
+                    chip8_draw_flag = true;
+                    PC += 2;
                     break;
-                    
-                case 0x000E: // 0x00EE: Returns from subroutine
-                    --sp;			// 16 levels of stack, decrease stack pointer to prevent overwrite
-                    pc = stack[sp];	// Put the stored return address from the stack back into the program counter
-                    pc += 2;		// Don't forget to increase the program counter!
+                case 0x00EE: // ret
+                    p("ret\n");
+                    PC = stack[--SP];
                     break;
                 default:
-                    printf("Invalid opcode: 0x%X\n",opcode);
+                    unknown_opcode(opcode);
             }
             break;
-
-        case 0x1000: // 0x1NNN: Jumps to address NNN
-            pc = opcode & 0x0FFF;
+        case 0x1000: // 1nnn: jump to address nnn
+            p("Jump to address 0x%x\n", nnn);
+            PC = nnn;
             break;
-    
-        case 0x2000: // 0x2NNN: Calls subroutine at NNN.
-            stack[sp] = pc;			// Store current address in stack
-            ++sp;					// Increment stack pointer
-            pc = opcode & 0x0FFF;	// Set the program counter to the address at NNN
+        case 0x2000: // 2nnn: call address nnn
+            p("Call address 0x%x\n", nnn);
+            stack[SP++] = PC + 2;
+            PC = nnn;
             break;
-            
-        case 0x3000: // 0x3XNN: Skips the next instruction if VX equals NN
-            (V[(opcode & 0x0F00) >> 8] == (opcode & 0x00FF))? pc += 4 : pc += 2;
+        case 0x3000: // 3xkk: skip next instr if V[x] = kk
+            p("Skip next instruction if 0x%x == 0x%x\n", V[x], kk);
+            PC += (V[x] == kk) ? 4 : 2;
             break;
-            
-        case 0x4000: // 0x4XNN: Skips the next instruction if VX doesn't equal NN
-            (V[(opcode & 0x0F00) >> 8] != (opcode & 0x00FF))? pc += 4 : pc += 2;
+        case 0x4000: // 4xkk: skip next instr if V[x] != kk
+            p("Skip next instruction if 0x%x != 0x%x\n", V[x], kk);
+            PC += (V[x] != kk) ? 4 : 2;
             break;
-            
-        case 0x5000: // 0x5XY0: Skips the next instruction if VX equals VY.
-            (V[(opcode & 0x0F00) >> 8] == V[(opcode & 0x00F0) >> 4]) ? pc += 4 : pc += 2;
+        case 0x5000: // 5xy0: skip next instr if V[x] == V[y]
+            p("Skip next instruction if 0x%x == 0x%x\n", V[x], V[y]);
+            PC += (V[x] == V[y]) ? 4 : 2;
             break;
-            
-        case 0x6000: // 0x6XNN: Sets VX to NN.
-            V[(opcode & 0x0F00) >> 8] = opcode & 0x00FF;
-            pc += 2;
+        case 0x6000: // 6xkk: set V[x] = kk
+            p("Set V[0x%x] to 0x%x\n", x, kk);
+            V[x] = kk;
+            PC += 2;
             break;
-            
-        case 0x7000: // 0x7XNN: Adds NN to VX.
-            V[(opcode & 0x0F00) >> 8] += opcode & 0x00FF;
-            pc += 2;
+        case 0x7000: // 7xkk: set V[x] = V[x] + kk
+            p("Set V[0x%d] to V[0x%d] + 0x%x\n", x, x, kk);
+            V[x] += kk;
+            PC += 2;
             break;
-            
-        case 0x8000:
-            switch(opcode & 0x000F)
-        {
-            case 0x0000: // 0x8XY0: Sets VX to the value of VY
-                V[(opcode & 0x0F00) >> 8] = V[(opcode & 0x00F0) >> 4];
-                pc += 2;
-                break;
-                
-            case 0x0001: // 0x8XY1: Sets VX to "VX OR VY"
-                V[(opcode & 0x0F00) >> 8] |= V[(opcode & 0x00F0) >> 4];
-                pc += 2;
-                break;
-                
-            case 0x0002: // 0x8XY2: Sets VX to "VX AND VY"
-                V[(opcode & 0x0F00) >> 8] &= V[(opcode & 0x00F0) >> 4];
-                pc += 2;
-                break;
-                
-            case 0x0003: // 0x8XY3: Sets VX to "VX XOR VY"
-                V[(opcode & 0x0F00) >> 8] ^= V[(opcode & 0x00F0) >> 4];
-                pc += 2;
-                break;
-                
-            case 0x0004: // 0x8XY4: Adds VY to VX. VF is set to 1 when there's a carry, and to 0 when there isn't
-                if(V[(opcode & 0x00F0) >> 4] > (0xFF - V[(opcode & 0x0F00) >> 8]))
-                    V[0xF] = 1; //carry
-                else
-                    V[0xF] = 0;
-                V[(opcode & 0x0F00) >> 8] += V[(opcode & 0x00F0) >> 4];
-                pc += 2;
-                break;
-                
-            case 0x0005: // 0x8XY5: VY is subtracted from VX. VF is set to 0 when there's a borrow, and 1 when there isn't
-                if(V[(opcode & 0x00F0) >> 4] > V[(opcode & 0x0F00) >> 8])
-                    V[0xF] = 0; // there is a borrow
-                else
-                    V[0xF] = 1;
-                V[(opcode & 0x0F00) >> 8] -= V[(opcode & 0x00F0) >> 4];
-                pc += 2;
-                break;
-                
-            case 0x0006: // 0x8XY6: Shifts VX right by one. VF is set to the value of the least significant bit of VX before the shift
-                V[0xF] = V[(opcode & 0x0F00) >> 8] & 0x1;
-                V[(opcode & 0x0F00) >> 8] >>= 1;
-                pc += 2;
-                break;
-                
-            case 0x0007: // 0x8XY7: Sets VX to VY minus VX. VF is set to 0 when there's a borrow, and 1 when there isn't
-                if(V[(opcode & 0x0F00) >> 8] > V[(opcode & 0x00F0) >> 4])	// VY-VX
-                    V[0xF] = 0; // there is a borrow
-                else
-                    V[0xF] = 1;
-                V[(opcode & 0x0F00) >> 8] = V[(opcode & 0x00F0) >> 4] - V[(opcode & 0x0F00) >> 8];				
-                pc += 2;
-                break;
-                
-            case 0x000E: // 0x8XYE: Shifts VX left by one. VF is set to the value of the most significant bit of VX before the shift
-                V[0xF] = V[(opcode & 0x0F00) >> 8] >> 7;
-                V[(opcode & 0x0F00) >> 8] <<= 1;
-                pc += 2;
-                break;
-                
-            default:
-                printf ("Unknown opcode [0x8000]: 0x%X\n", opcode);
-        }
+        case 0x8000: // 8xyn: Arithmetic stuff
+            switch (n) {
+                case 0x0:
+                    p("V[0x%x] = V[0x%x] = 0x%x\n", x, y, V[y]);
+                    V[x] = V[y];
+                    break;
+                case 0x1:
+                    p("V[0x%x] |= V[0x%x] = 0x%x\n", x, y, V[y]);
+                    V[x] = V[x] | V[y];
+                    break;
+                case 0x2:
+                    p("V[0x%x] &= V[0x%x] = 0x%x\n", x, y, V[y]);
+                    V[x] = V[x] & V[y];
+                    break;
+                case 0x3:
+                    p("V[0x%x] ^= V[0x%x] = 0x%x\n", x, y, V[y]);
+                    V[x] = V[x] ^ V[y];
+                    break;
+                case 0x4:
+                    p("V[0x%x] = V[0x%x] + V[0x%x] = 0x%x + 0x%x\n", x, x, y, V[x], V[y]);
+                    V[0xF] = ((int) V[x] + (int) V[y]) > 255 ? 1 : 0;
+                    V[x] = V[x] + V[y];
+                    break;
+                case 0x5:
+                    p("V[0x%x] = V[0x%x] - V[0x%x] = 0x%x - 0x%x\n", x, x, y, V[x], V[y]);
+                    V[0xF] = (V[x] > V[y]) ? 1 : 0;
+                    V[x] = V[x] - V[y];
+                    break;
+                case 0x6:
+                    p("V[0x%x] = V[0x%x] >> 1 = 0x%x >> 1\n", x, x, V[x]);
+                    V[0xF] = V[x] & 0x1;
+                    V[x] = (V[x] >> 1);
+                    break;
+                case 0x7:
+                    p("V[0x%x] = V[0x%x] - V[0x%x] = 0x%x - 0x%x\n", x, y, x, V[y], V[x]);
+                    V[0xF] = (V[y] > V[x]) ? 1 : 0;
+                    V[x] = V[y] - V[x];
+                    break;
+                case 0xE:
+                    p("V[0x%x] = V[0x%x] << 1 = 0x%x << 1\n", x, x, V[x]);
+                    V[0xF] = (V[x] >> 7) & 0x1;
+                    V[x] = (V[x] << 1);
+                    break;
+                default:
+                    unknown_opcode(opcode);
+            }
+            PC += 2;
             break;
-            
-        case 0x9000: // 0x9XY0: Skips the next instruction if VX doesn't equal VY
-            (V[(opcode & 0x0F00) >> 8] != V[(opcode & 0x00F0) >> 4])? pc += 4 : pc += 2;
+        case 0x9000: // 9xy0: skip instruction if Vx != Vy
+            switch (n) {
+                case 0x0:
+                    p("Skip next instruction if 0x%x != 0x%x\n", V[x], V[y]);
+                    PC += (V[x] != V[y]) ? 4 : 2;
+                    break;
+                default:
+                    unknown_opcode(opcode);
+            }
             break;
-            
-        case 0xA000: //Sets I to the address NNN.
-            //execute opcode
-            I = opcode & 0x0FF;
-            pc += 2;
+        case 0xA000: // Annn: set I to address nnn
+            p("Set I to 0x%x\n", nnn);
+            I = nnn;
+            PC += 2;
             break;
-        
-        case 0xB000: // BNNN: Jumps to the address NNN plus V0
-            pc = (opcode & 0x0FFF) + V[0];
+        case 0xB000: // Bnnn: jump to location nnn + V[0]
+            p("Jump to 0x%x + V[0] (0x%x)\n", nnn, V[0]);
+            PC = nnn + V[0];
             break;
-            
-        case 0xC000: // CXNN: Sets VX to a random number and NN
-            V[(opcode & 0x0F00) >> 8] = (rand() % 0xFF) & (opcode & 0x00FF);
-            pc += 2;
+        case 0xC000: // Cxkk: V[x] = random byte AND kk
+            p("V[0x%x] = random byte\n", x);
+            V[x] = randbyte() & kk;
+            PC += 2;
             break;
-         
-        case 0xD000: // DXYN: Draws a sprite at coordinate (VX, VY) that has a width of 8 pixels and a height of N pixels.
-            // Each row of 8 pixels is read as bit-coded starting from memory location I;
-            // I value doesn't change after the execution of this instruction.
-            // VF is set to 1 if any screen pixels are flipped from set to unset when the sprite is drawn,
-            // and to 0 if that doesn't happen
-        {
-            unsigned short x = V[(opcode & 0x0F00) >> 8];
-            unsigned short y = V[(opcode & 0x00F0) >> 4];
-            unsigned short height = opcode & 0x000F;
-            unsigned short pixel;
-            
-            V[0xF] = 0;
-            for (int yline = 0; yline < height; yline++)
-            {
-                pixel = memory[I + yline];
-                for(int xline = 0; xline < 8; xline++)
-                {
-                    if((pixel & (0x80 >> xline)) != 0)
-                    {
-                        if(gfx[(x + xline + ((y + yline) * 64))] == 1)
-                        {
-                            V[0xF] = 1;
+        case 0xD000: // Dxyn: Display an n-byte sprite starting at memory
+            // location I at (Vx, Vy) on the screen, VF = collision
+            p("Draw sprite at (V[0x%x], V[0x%x]) = (0x%x, 0x%x) of height %d",
+              x, y, V[x], V[y], n);
+            draw_sprite(V[x], V[y], n);
+            PC += 2;
+            chip8_draw_flag = true;
+            break;
+        case 0xE000: // key-pressed events
+            switch (kk) {
+                case 0x9E: // skip next instr if key[Vx] is pressed
+                    p("Skip next instruction if key[%d] is pressed\n", x);
+                    PC += (key[V[x]]) ? 4 : 2;
+                    break;
+                case 0xA1: // skip next instr if key[Vx] is not pressed
+                    p("Skip next instruction if key[%d] is NOT pressed\n", x);
+                    PC += (!key[V[x]]) ? 4 : 2;
+                    break;
+                default:
+                    unknown_opcode(opcode);
+            }
+            break;
+        case 0xF000: // misc
+            switch (kk) {
+                case 0x07:
+                    p("V[0x%x] = delay timer = %d\n", x, delay_timer);
+                    V[x] = delay_timer;
+                    PC += 2;
+                    break;
+                case 0x0A:
+                    i = 0;
+                    printf("Wait for key instruction\n");
+                    while (true) {
+                        for (i = 0; i < KEY_SIZE; i++) {
+                            if (key[i]) {
+                                V[x] = i;
+                                goto got_key_press;
+                            }
                         }
-                        gfx[x + xline + ((y + yline) * 64)] ^= 1;
                     }
-                }
+                got_key_press:
+                    PC += 2;
+                    break;
+                case 0x15:
+                    p("delay timer = V[0x%x] = %d\n", x, V[x]);
+                    delay_timer = V[x];
+                    PC += 2;
+                    break;
+                case 0x18:
+                    p("sound timer = V[0x%x] = %d\n", x, V[x]);
+                    sound_timer = V[x];
+                    PC += 2;
+                    break;
+                case 0x1E:
+                    p("I = I + V[0x%x] = 0x%x + 0x%x\n", x, I, V[x]);
+                    V[0xF] = (I + V[x] > 0xfff) ? 1 : 0;
+                    I = I + V[x];
+                    PC += 2;
+                    break;
+                case 0x29:
+                    p("I = location of font for character V[0x%x] = 0x%x\n", x, V[x]);
+                    I = FONTSET_BYTES_PER_CHAR * V[x];
+                    PC += 2;
+                    break;
+                case 0x33:
+                    p("Store BCD for %d starting at address 0x%x\n", V[x], I);
+                    memory[I]   = (V[x] % 1000) / 100; // hundred's digit
+                    memory[I+1] = (V[x] % 100) / 10;   // ten's digit
+                    memory[I+2] = (V[x] % 10);         // one's digit
+                    PC += 2;
+                    break;
+                case 0x55:
+                    p("Copy sprite from registers 0 to 0x%x into memory at address 0x%x\n", x, I);
+                    for (i = 0; i <= x; i++) { memory[I + i] = V[i]; }
+                    I += x + 1;
+                    PC += 2;
+                    break;
+                case 0x65:
+                    p("Copy sprite from memory at address 0x%x into registers 0 to 0x%x\n", x, I);
+                    for (i = 0; i <= x; i++) { V[i] = memory[I + i]; }
+                    I += x + 1;
+                    PC += 2;
+                    break;
+                default:
+                    unknown_opcode(opcode);
             }
-            
-            drawFlag = true;
-            pc += 2;
-        }
             break;
-            
-        case 0xE000:
-            switch(opcode & 0x00FF)
-        {
-            case 0x009E: // EX9E: Skips the next instruction if the key stored in VX is pressed
-                if(key[V[(opcode & 0x0F00) >> 8]] != 0)
-                    pc += 4;
-                else
-                    pc += 2;
-                break;
-                
-            case 0x00A1: // EXA1: Skips the next instruction if the key stored in VX isn't pressed
-                if(key[V[(opcode & 0x0F00) >> 8]] == 0)
-                    pc += 4;
-                else
-                    pc += 2;
-                break;
-                
-            default:
-                printf ("Unknown opcode [0xE000]: 0x%X\n", opcode);
-        }
-            break;
-            
-        case 0xF000:
-            switch(opcode & 0x00FF)
-        {
-            case 0x0007: // FX07: Sets VX to the value of the delay timer
-                V[(opcode & 0x0F00) >> 8] = delay_timer;
-                pc += 2;
-                break;
-                
-            case 0x000A: // FX0A: A key press is awaited, and then stored in VX
-            {
-                bool keyPress = false;
-                
-                for(int i = 0; i < 16; ++i)
-                {
-                    if(key[i] != 0)
-                    {
-                        V[(opcode & 0x0F00) >> 8] = i;
-                        keyPress = true;
-                    }
-                }
-                
-                // If we didn't received a keypress, skip this cycle and try again.
-                if(!keyPress)
-                    return;
-                
-                pc += 2;
-            }
-                break;
-                
-            case 0x0015: // FX15: Sets the delay timer to VX
-                delay_timer = V[(opcode & 0x0F00) >> 8];
-                pc += 2;
-                break;
-                
-            case 0x0018: // FX18: Sets the sound timer to VX
-                sound_timer = V[(opcode & 0x0F00) >> 8];
-                pc += 2;
-                break;
-                
-            case 0x001E: // FX1E: Adds VX to I
-                if(I + V[(opcode & 0x0F00) >> 8] > 0xFFF)	// VF is set to 1 when range overflow (I+VX>0xFFF), and 0 when there isn't.
-                    V[0xF] = 1;
-                else
-                    V[0xF] = 0;
-                I += V[(opcode & 0x0F00) >> 8];
-                pc += 2;
-                break;
-                
-            case 0x0029: // FX29: Sets I to the location of the sprite for the character in VX. Characters 0-F (in hexadecimal) are represented by a 4x5 font
-                I = V[(opcode & 0x0F00) >> 8] * 0x5;
-                pc += 2;
-                break;
-                
-            case 0x0033: // FX33: Stores the Binary-coded decimal representation of VX at the addresses I, I plus 1, and I plus 2
-                memory[I]     = V[(opcode & 0x0F00) >> 8] / 100;
-                memory[I + 1] = (V[(opcode & 0x0F00) >> 8] / 10) % 10;
-                memory[I + 2] = (V[(opcode & 0x0F00) >> 8] % 100) % 10;					
-                pc += 2;
-                break;
-                
-            case 0x0055: // FX55: Stores V0 to VX in memory starting at address I					
-                for (int i = 0; i <= ((opcode & 0x0F00) >> 8); ++i)
-                    memory[I + i] = V[i];	
-                
-                // On the original interpreter, when the operation is done, I = I + X + 1.
-                I += ((opcode & 0x0F00) >> 8) + 1;
-                pc += 2;
-                break;
-                
-            case 0x0065: // FX65: Fills V0 to VX with values from memory starting at address I					
-                for (int i = 0; i <= ((opcode & 0x0F00) >> 8); ++i)
-                    V[i] = memory[I + i];			
-                
-                // On the original interpreter, when the operation is done, I = I + X + 1.
-                I += ((opcode & 0x0F00) >> 8) + 1;
-                pc += 2;
-                break;
-                
-            default:
-                printf ("Unknown opcode [0xF000]: 0x%X\n", opcode);
-        }
-            break;
-            
         default:
-            printf ("Unknown opcode: 0x%X\n", opcode);
-
-            
+            unknown_opcode(opcode);
     }
-    //update timers
-    if(delay_timer > 0)
-        --delay_timer;
     
-    if(sound_timer > 0)
-    {
-        if(sound_timer == 1)
-            printf("BEEP!\n");
-        --sound_timer;
-    }
+#ifdef DEBUG
+    print_state();
+#endif
 }
 
 void core::debugRender()
@@ -370,6 +403,8 @@ void core::debugRender()
     }
     printf("\n");
 }
+
+
 
 
 bool core::loadApplication(const char * filename)
@@ -421,6 +456,19 @@ bool core::loadApplication(const char * filename)
     free(buffer);
     
     return true;
+}
+
+void core::tick(){
+    // update timers
+    if (delay_timer > 0) {
+        --delay_timer;
+    }
+    if (sound_timer > 0) {
+        --sound_timer;
+        if (sound_timer == 0) {
+            printf("BEEP!\n");
+        }
+    }
 }
 
 

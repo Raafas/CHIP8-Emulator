@@ -16,205 +16,177 @@
 #include <GL/glut.h>
 #endif
 #include "core.h"
-#include <stdio.h>
-#include <cstdlib>
+#include <cstdlib> //exit(0)
 #include <cstdint> //OS X __int8 problem
+#include <stdint.h>
+#include <float.h>
+#include <sys/time.h>
 
 
 core chip8;
-int modifier = 10;
-int display_width = SCREEN_WIDTH * modifier;
-int display_height = SCREEN_HEIGHT * modifier;
-
-typedef uint8_t BYTE;
-BYTE screenData[SCREEN_HEIGHT][SCREEN_WIDTH][3];
 
 
-void display();
-void setupTexture();
-void reshape_window(GLsizei w, GLsizei h);
-void keyboardUp(unsigned char key, int x, int y);
-void keyboardDown(unsigned char key, int x, int y);
+#define PIXEL_SIZE 5
 
+#define CLOCK_HZ 60
+#define CLOCK_RATE_MS ((int) ((1.0 / CLOCK_HZ) * 1000 + 0.5))
 
-int main(int argc, char** argv)
-{
-    // Load game
-    if(!chip8.loadApplication(argv[1]))
-        return 1;
-    
-    printf("Load ok");
+#define BLACK 0
+#define WHITE 255
 
-    glutInit(&argc, argv);
-    glutInitDisplayMode(GLUT_DOUBLE | GLUT_RGBA);
- 
-    glutInitWindowSize(display_width, display_height);
-    glutInitWindowPosition(0, 0);
-    glutCreateWindow("CHIP8");
-    
-    glutDisplayFunc(display);
-    glutIdleFunc(display);
-    glutReshapeFunc(reshape_window);
-    glutKeyboardFunc(keyboardDown);
-    glutKeyboardUpFunc(keyboardUp);
+#define SCREEN_ROWS (GFX_ROWS * PIXEL_SIZE)
+#define SCREEN_COLS (GFX_COLS * PIXEL_SIZE)
+unsigned char screen[SCREEN_ROWS][SCREEN_COLS][3];
 
-#ifdef DRAWWITHTEXTURE
-    setupTexture();
-#endif
-    glutMainLoop();
+extern uint8_t key[KEY_SIZE];
+extern uint8_t gfx[GFX_ROWS][GFX_COLS];
+extern bool chip8_draw_flag;
 
-    return 0;
+struct timeval clock_prev;
+
+int timediff_ms(struct timeval *end, struct timeval *start) {
+    int diff =  (int)(end->tv_sec - start->tv_sec) * 1000 + (end->tv_usec - start->tv_usec) / 1000;
+    //printf("timediff = %d\n", diff);
+    return diff;
 }
 
-void setupTexture()
-{
-    // Clear screen
-    for(int y = 0; y < SCREEN_HEIGHT; ++y)
-        for(int x = 0; x < SCREEN_WIDTH; ++x)
-            screenData[y][x][0] = screenData[y][x][1] = screenData[y][x][2] = 0;
-    
-    // Create a texture
-    glTexImage2D(GL_TEXTURE_2D, 0, 3, SCREEN_WIDTH, SCREEN_HEIGHT, 0, GL_RGB, GL_UNSIGNED_BYTE, (GLvoid*)screenData);
-    
-    // Set up the texture
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP);
-    
-    // Enable textures
-    glEnable(GL_TEXTURE_2D);
+void gfx_setup() {
+    memset(screen, BLACK, sizeof(unsigned char) * SCREEN_ROWS * SCREEN_COLS * 3);
+    glClear(GL_COLOR_BUFFER_BIT);
 }
 
-void updateTexture(const core& c8)
-{
-    // Update pixels
-    for(int y = 0; y < 32; ++y)
-        for(int x = 0; x < 64; ++x)
-            if(c8.gfx[(y * 64) + x] == 0)
-                screenData[y][x][0] = screenData[y][x][1] = screenData[y][x][2] = 0;	// Disabled
-            else
-                screenData[y][x][0] = screenData[y][x][1] = screenData[y][x][2] = 255;  // Enabled
-    
-    // Update Texture
-    glTexSubImage2D(GL_TEXTURE_2D, 0 ,0, 0, SCREEN_WIDTH, SCREEN_HEIGHT, GL_RGB, GL_UNSIGNED_BYTE, (GLvoid*)screenData);
-    
-    glBegin( GL_QUADS );
-    glTexCoord2d(0.0, 0.0);		glVertex2d(0.0,			  0.0);
-    glTexCoord2d(1.0, 0.0); 	glVertex2d(display_width, 0.0);
-    glTexCoord2d(1.0, 1.0); 	glVertex2d(display_width, display_height);
-    glTexCoord2d(0.0, 1.0); 	glVertex2d(0.0,			  display_height);
-    glEnd();
-}
-
-// Old gfx code
-void drawPixel(int x, int y)
-{
-    glBegin(GL_QUADS);
-    glVertex3f((x * modifier) + 0.0f,     (y * modifier) + 0.0f,	 0.0f);
-    glVertex3f((x * modifier) + 0.0f,     (y * modifier) + modifier, 0.0f);
-    glVertex3f((x * modifier) + modifier, (y * modifier) + modifier, 0.0f);
-    glVertex3f((x * modifier) + modifier, (y * modifier) + 0.0f,	 0.0f);
-    glEnd();
-}
-
-void updateQuads(const core& c8)
-{
-    // Draw
-    for(int y = 0; y < 32; ++y)
-        for(int x = 0; x < 64; ++x)
-        {
-            if(c8.gfx[(y*64) + x] == 0)
-                glColor3f(0.0f,0.0f,0.0f);
-            else
-                glColor3f(1.0f,1.0f,1.0f);
+int keymap(unsigned char k) {
+    switch (k) {
+        case '1': return 0x1;
+        case '2': return 0x2;
+        case '3': return 0x3;
+        case '4': return 0xc;
             
-            drawPixel(x, y);
-        }
-}
-
-void display()
-{
-    chip8.emulateCycle();
-    
-    if(chip8.drawFlag)
-    {
-        // Clear framebuffer
-        glClear(GL_COLOR_BUFFER_BIT);
-        
-#ifdef DRAWWITHTEXTURE
-        updateTexture(chip8);
-#else
-        updateQuads(chip8);
-#endif
-        
-        // Swap buffers!
-        glutSwapBuffers();
-        
-        // Processed frame
-        chip8.drawFlag = false;
+        case 'q': return 0x4;
+        case 'w': return 0x5;
+        case 'e': return 0x6;
+        case 'r': return 0xd;
+            
+        case 'a': return 0x7;
+        case 's': return 0x8;
+        case 'd': return 0x9;
+        case 'f': return 0xe;
+            
+        case 'z': return 0xa;
+        case 'x': return 0x0;
+        case 'c': return 0xb;
+        case 'v': return 0xf;
+            
+        default:  return -1;
     }
 }
 
-void reshape_window(GLsizei w, GLsizei h)
-{
-    glClearColor(0.0f, 0.0f, 0.5f, 0.0f);
-    glMatrixMode(GL_PROJECTION);
-    glLoadIdentity();
-    gluOrtho2D(0, w, h, 0);
-    glMatrixMode(GL_MODELVIEW);
-    glViewport(0, 0, w, h);
+void keypress(unsigned char k, int x, int y) {
+    (void) x; (void) y;
     
-    // Resize quad
-    display_width = w;
-    display_height = h;
+    int index = keymap(k);
+    if (index >= 0) { key[index] = 1; }
 }
 
-void keyboardDown(unsigned char key, int x, int y)
-{
-    if(key == 27)    // esc
-        exit(0);
+void keyrelease(unsigned char k, int x, int y) {
+    (void) x; (void) y;
     
-    if(key == '1')		chip8.key[0x1] = 1;
-    else if(key == '2')	chip8.key[0x2] = 1;
-    else if(key == '3')	chip8.key[0x3] = 1;
-    else if(key == '4')	chip8.key[0xC] = 1;
-    
-    else if(key == 'q')	chip8.key[0x4] = 1;
-    else if(key == 'w')	chip8.key[0x5] = 1;
-    else if(key == 'e')	chip8.key[0x6] = 1;
-    else if(key == 'r')	chip8.key[0xD] = 1;
-    
-    else if(key == 'a')	chip8.key[0x7] = 1;
-    else if(key == 's')	chip8.key[0x8] = 1;
-    else if(key == 'd')	chip8.key[0x9] = 1;
-    else if(key == 'f')	chip8.key[0xE] = 1;
-    
-    else if(key == 'z')	chip8.key[0xA] = 1;
-    else if(key == 'x')	chip8.key[0x0] = 1;
-    else if(key == 'c')	chip8.key[0xB] = 1;
-    else if(key == 'v')	chip8.key[0xF] = 1;
+    int index = keymap(k);
+    if (index >= 0) { key[index] = 0; }
 }
 
-void keyboardUp(unsigned char key, int x, int y)
-{
-    if(key == '1')		chip8.key[0x1] = 0;
-    else if(key == '2')	chip8.key[0x2] = 0;
-    else if(key == '3')	chip8.key[0x3] = 0;
-    else if(key == '4')	chip8.key[0xC] = 0;
-    
-    else if(key == 'q')	chip8.key[0x4] = 0;
-    else if(key == 'w')	chip8.key[0x5] = 0;
-    else if(key == 'e')	chip8.key[0x6] = 0;
-    else if(key == 'r')	chip8.key[0xD] = 0;
-    
-    else if(key == 'a')	chip8.key[0x7] = 0;
-    else if(key == 's')	chip8.key[0x8] = 0;
-    else if(key == 'd')	chip8.key[0x9] = 0;
-    else if(key == 'f')	chip8.key[0xE] = 0;
-    
-    else if(key == 'z')	chip8.key[0xA] = 0;
-    else if(key == 'x')	chip8.key[0x0] = 0;
-    else if(key == 'c')	chip8.key[0xB] = 0;
-    else if(key == 'v')	chip8.key[0xF] = 0;
+inline void paint_pixel(int row, int col, unsigned char color) {
+    row = SCREEN_ROWS - 1 - row;
+    screen[row][col][0] = screen[row][col][1] = screen[row][col][2] = color;
 }
+
+void paint_cell(int row, int col, unsigned char color) {
+    int pixel_row = row * PIXEL_SIZE;
+    int pixel_col = col * PIXEL_SIZE;
+    int drow, dcol;
+    
+    for (drow = 0; drow < PIXEL_SIZE; drow++) {
+        for (dcol = 0; dcol < PIXEL_SIZE; dcol++) {
+            paint_pixel(pixel_row + drow, pixel_col + dcol, color);
+        }
+    }
+}
+
+void draw() {
+    int row, col;
+    
+    // Clear framebuffer
+    glClear(GL_COLOR_BUFFER_BIT);
+    
+    // Draw pixels to the buffer
+    for (row = 0; row < GFX_ROWS; row++) {
+        for (col = 0; col < GFX_COLS; col++) {
+            paint_cell(row, col, gfx[row][col] ? WHITE : BLACK);
+        }
+    }
+    
+    // Update Texture
+    glDrawPixels(SCREEN_COLS, SCREEN_ROWS, GL_RGB, GL_UNSIGNED_BYTE,
+                 (void *) screen);
+    glutSwapBuffers();
+}
+
+void loop() {
+    struct timeval clock_now;
+    gettimeofday(&clock_now, NULL);
+    
+    chip8.emulateCycle();
+    
+    if (chip8_draw_flag) {
+        draw();
+        chip8_draw_flag = false;
+    }
+    
+    if (timediff_ms(&clock_now, &clock_prev) >= CLOCK_RATE_MS) {
+        chip8.tick();
+        clock_prev = clock_now;
+    }
+}
+
+void reshape_window(GLsizei w, GLsizei h) {
+    (void) w; (void) h;
+}
+
+int main(int argc, char **argv) {
+    
+    if (argc != 2) {
+        fprintf(stderr, "Usage: ./CHIP8 <game.c8>\n");
+        exit(2);
+    }
+    
+    // Setup Chip8
+    chip8.initialize();
+    chip8.loadApplication(argv[1]);
+    
+    // Setup OpenGL
+    glutInit(&argc, argv);
+    glutInitDisplayMode(GLUT_DOUBLE | GLUT_RGBA);
+    
+    glutInitWindowSize(SCREEN_COLS, SCREEN_ROWS);
+    glutInitWindowPosition(0, 0);
+    glutCreateWindow("Chip8");
+    
+    glutDisplayFunc(draw);
+    glutIdleFunc(loop);
+    glutReshapeFunc(reshape_window);
+    
+    glutKeyboardFunc(keypress);
+    glutKeyboardUpFunc(keyrelease);
+    
+    gfx_setup();
+    
+    gettimeofday(&clock_prev, NULL);
+    
+    // Run the emulator
+    glutMainLoop();  
+    
+    return 0;
+}
+
+
+
